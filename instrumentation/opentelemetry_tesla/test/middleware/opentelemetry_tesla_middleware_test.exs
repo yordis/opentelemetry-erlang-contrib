@@ -163,7 +163,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     end
   end
 
-  test "Records spans for Tesla HTTP client", %{bypass: bypass} do
+  test "records spans for Tesla HTTP client", %{bypass: bypass} do
     defmodule TestClient do
       def get(client) do
         Tesla.get(client, "/users/")
@@ -223,7 +223,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
   ]
 
   for code <- @error_codes do
-    test "Marks Span status as :error when HTTP request fails with #{code}", %{bypass: bypass} do
+    test "marks span status as :error when HTTP request fails with #{code}", %{bypass: bypass} do
       defmodule TestClient do
         def get(client) do
           Tesla.get(client, "/users/")
@@ -252,7 +252,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     end
   end
 
-  test "Marks Span status as :errors when max redirects are exceeded", %{bypass: bypass} do
+  test "marks span status as :errors when max redirects are exceeded", %{bypass: bypass} do
     defmodule TestClient do
       def get(client) do
         Tesla.get(client, "/users/")
@@ -289,7 +289,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     assert_receive {:span, span(status: {:status, :error, ""})}
   end
 
-  test "Marks Span status as :error if error status is within `mark_status_ok` opt list",
+  test "marks span status as :error if error status is within `mark_status_ok` opt list",
        %{bypass: bypass} do
     defmodule TestClient do
       def get(client) do
@@ -318,7 +318,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     assert_receive {:span, span(status: {:status, :ok, ""})}
   end
 
-  test "Marks Span status as :ok unless error status is within `mark_status_ok` opt list",
+  test "marks span status as :ok unless error status is within `mark_status_ok` opt list",
        %{bypass: bypass} do
     defmodule TestClient do
       def get(client) do
@@ -347,7 +347,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     assert_receive {:span, span(status: {:status, :error, ""})}
   end
 
-  test "Appends query string parameters to http.url attribute", %{bypass: bypass} do
+  test "appends query string parameters to http.url attribute", %{bypass: bypass} do
     defmodule TestClient do
       def get(client, id) do
         params = [id: id]
@@ -421,7 +421,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
              "http://localhost:#{bypass.port}/users/2"
   end
 
-  test "Handles url path arguments correctly", %{bypass: bypass} do
+  test "handles url path arguments correctly", %{bypass: bypass} do
     defmodule TestClient do
       def get(client, id) do
         params = [id: id]
@@ -453,7 +453,7 @@ defmodule Tesla.Middleware.OpenTelemetryTest do
     assert %{"http.target": "/users/2"} = :otel_attributes.map(attributes)
   end
 
-  test "Records http.response_content_length param into the span", %{bypass: bypass} do
+  test "records http.response_content_length param into the span", %{bypass: bypass} do
     defmodule TestClient do
       def get(client, id) do
         params = [id: id]
