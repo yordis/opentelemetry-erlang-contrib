@@ -1,10 +1,32 @@
 defmodule OpentelemetryGrpc.Test.TestServer do
   use GRPC.Server, service: Testserver.V1.TestService.Service
 
+  require OpenTelemetry.Tracer, as: Tracer
+
   alias Testserver.V1.{
     HelloResponse,
     NumberResponse
   }
+
+  def say_hello(%{name: "CreateChildSpan"}, _stream) do
+    Tracer.with_span "handler.child_span" do
+      Tracer.set_attribute("handler.process", inspect(self()))
+    end
+
+    %HelloResponse{message: "child span created"}
+  end
+
+  def say_hello(%{name: "CreateChildSpanViaFlow"} = request, stream) do
+    GRPC.Stream.unary(request, materializer: stream)
+    |> GRPC.Stream.map(fn _req ->
+      Tracer.with_span "flow.child_span" do
+        Tracer.set_attribute("flow.worker_pid", inspect(self()))
+      end
+
+      %HelloResponse{message: "flow child span created"}
+    end)
+    |> GRPC.Stream.run()
+  end
 
   def say_hello(%{name: "TriggerOK"}, _stream) do
     %HelloResponse{message: "OK"}

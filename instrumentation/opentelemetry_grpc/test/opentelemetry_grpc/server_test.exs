@@ -23,6 +23,9 @@ defmodule OpentelemetryGrpc.ServerTest do
     Application.ensure_all_started(:telemetry)
     Application.ensure_all_started(:grpc)
 
+    {:ok, _} =
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: GRPC.Client.Supervisor)
+
     port = TestSupport.start_server(@test_port)
 
     on_exit(fn ->
@@ -167,6 +170,115 @@ defmodule OpentelemetryGrpc.ServerTest do
                :"rpc.grpc.status_code" => 0,
                "elixir.grpc.server_module" => "Elixir.OpentelemetryGrpc.Test.TestServer"
              }
+
+      TestSupport.disconnect_client(channel)
+    end
+  end
+
+  describe "context propagation — handler child spans" do
+    test "a span created inside the gRPC handler should be a child of the server span", %{
+      port: port
+    } do
+      {:ok, channel} =
+        TestSupport.connect_client(port,
+          interceptors: [OpentelemetryGrpc.ContextPropagatorInterceptor]
+        )
+
+      request = %HelloRequest{name: "CreateChildSpan"}
+
+      assert {:ok, _response} = TestService.Stub.say_hello(channel, request)
+
+      # We expect TWO spans:
+      # 1. The gRPC server span (created by OpentelemetryGrpc.Server)
+      # 2. The child span (created inside the handler via Tracer.with_span)
+
+      # Collect both spans
+      assert_receive {:span, server_span}, 5_000
+      assert_receive {:span, child_span}, 5_000
+
+      # Identify which is which based on span name
+      {server_span, child_span} =
+        case {span(server_span, :name), span(child_span, :name)} do
+          {"testserver.v1.TestService/SayHello", "handler.child_span"} ->
+            {server_span, child_span}
+
+          {"handler.child_span", "testserver.v1.TestService/SayHello"} ->
+            {child_span, server_span}
+        end
+
+      assert span(server_span, :name) == "testserver.v1.TestService/SayHello"
+      assert span(server_span, :kind) == :server
+      assert span(child_span, :name) == "handler.child_span"
+
+      # Extract trace IDs and span IDs
+      server_span_ctx = span(server_span, :span_id)
+      server_trace_id = span(server_span, :trace_id)
+
+      child_trace_id = span(child_span, :trace_id)
+      child_parent_span_id = span(child_span, :parent_span_id)
+
+      # THE CRITICAL ASSERTION:
+      # The child span MUST share the same trace_id as the server span
+      assert child_trace_id == server_trace_id,
+             "Child span should be in the same trace as the server span.\n" <>
+               "Server trace_id: #{server_trace_id}\n" <>
+               "Child trace_id:  #{child_trace_id}\n" <>
+               "This means the handler code runs without the server span's OTel context."
+
+      # The child span's parent MUST be the server span
+      assert child_parent_span_id == server_span_ctx,
+             "Child span's parent should be the server span.\n" <>
+               "Server span_id:        #{server_span_ctx}\n" <>
+               "Child parent_span_id:  #{child_parent_span_id}\n" <>
+               "This means the gRPC server span context is not propagated to the handler process."
+
+      TestSupport.disconnect_client(channel)
+    end
+
+    test "a span created inside a GRPC.Stream.map (Flow worker) should be a child of the server span",
+         %{port: port} do
+      {:ok, channel} =
+        TestSupport.connect_client(port,
+          interceptors: [OpentelemetryGrpc.ContextPropagatorInterceptor]
+        )
+
+      request = %HelloRequest{name: "CreateChildSpanViaFlow"}
+
+      assert {:ok, _response} = TestService.Stub.say_hello(channel, request)
+
+      # Collect both spans
+      assert_receive {:span, first_span}, 5_000
+      assert_receive {:span, second_span}, 5_000
+
+      {server_span, child_span} =
+        case {span(first_span, :name), span(second_span, :name)} do
+          {"testserver.v1.TestService/SayHello", "flow.child_span"} ->
+            {first_span, second_span}
+
+          {"flow.child_span", "testserver.v1.TestService/SayHello"} ->
+            {second_span, first_span}
+        end
+
+      assert span(server_span, :name) == "testserver.v1.TestService/SayHello"
+      assert span(child_span, :name) == "flow.child_span"
+
+      server_span_ctx = span(server_span, :span_id)
+      server_trace_id = span(server_span, :trace_id)
+
+      child_trace_id = span(child_span, :trace_id)
+      child_parent_span_id = span(child_span, :parent_span_id)
+
+      assert child_trace_id == server_trace_id,
+             "Flow child span should be in the same trace as the server span.\n" <>
+               "Server trace_id: #{server_trace_id}\n" <>
+               "Child trace_id:  #{child_trace_id}\n" <>
+               "This means GRPC.Stream.map runs in a Flow worker process without the server span's OTel context."
+
+      assert child_parent_span_id == server_span_ctx,
+             "Flow child span's parent should be the server span.\n" <>
+               "Server span_id:        #{server_span_ctx}\n" <>
+               "Child parent_span_id:  #{child_parent_span_id}\n" <>
+               "This means the gRPC server span context is NOT propagated to Flow worker processes."
 
       TestSupport.disconnect_client(channel)
     end
