@@ -52,6 +52,20 @@ defmodule OpentelemetryBroadwayTest do
     assert attrs_map[:"messaging.operation.type"] == :process
   end
 
+  test "handle_failed runs after the message span has ended" do
+    name = :"TestBroadway#{System.unique_integer([:positive])}"
+    start_supervised!({TestBroadway, [name: name, test_pid: self()]})
+
+    ref = Broadway.test_message(name, "error")
+
+    assert_receive {:ack, ^ref, [], [_]}
+    assert_receive {:handle_message_span_ctx, span_ctx_during_handle_message}
+    assert_receive {:handle_failed_span_ctx, span_ctx_during_handle_failed}
+
+    assert span_ctx_during_handle_message != :undefined
+    assert span_ctx_during_handle_failed == :undefined
+  end
+
   test "records span on message which fails" do
     ref = Broadway.test_message(TestBroadway, "error")
 
